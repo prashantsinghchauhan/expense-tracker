@@ -8,6 +8,7 @@ import CategoryChart from '../components/CategoryChart';
 import BudgetAlerts from '../components/BudgetAlerts';
 import RecentTransactions from '../components/RecentTransactions';
 import AddExpenseModal from '../components/AddExpenseModal';
+import ReminderWidget from '../components/ReminderWidget';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -20,17 +21,26 @@ function Dashboard({ user }) {
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Month selector: null = overall/all time, 'YYYY-MM' = specific month
+  const [categoryMonth, setCategoryMonth] = useState(null);
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [categoryMonth]);
 
   const loadDashboardData = async () => {
     try {
       setLoading(true);
+      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const monthParam = categoryMonth === 'current' ? currentMonth : (categoryMonth || null);
+      
+      const categoryUrl = monthParam 
+        ? `${BACKEND_URL}/api/expenses/summary/by-category?month=${monthParam}`
+        : `${BACKEND_URL}/api/expenses/summary/by-category`;
+      
       const [summaryRes, categoryRes, trendRes, alertsRes, expensesRes] = await Promise.all([
         axios.get(`${BACKEND_URL}/api/expenses/summary/stats`, { withCredentials: true }),
-        axios.get(`${BACKEND_URL}/api/expenses/summary/by-category`, { withCredentials: true }),
+        axios.get(categoryUrl, { withCredentials: true }),
         axios.get(`${BACKEND_URL}/api/expenses/summary/monthly-trend`, { withCredentials: true }),
         axios.get(`${BACKEND_URL}/api/budgets/alerts`, { withCredentials: true }),
         axios.get(`${BACKEND_URL}/api/expenses?limit=5`, { withCredentials: true })
@@ -68,7 +78,7 @@ function Dashboard({ user }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pt-16">
       <Navigation user={user} />
       
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -88,10 +98,42 @@ function Dashboard({ user }) {
           </div>
         )}
 
+        {/* Active Reminders */}
+        <div className="mb-8">
+          <ReminderWidget onReminderExecuted={loadDashboardData} />
+        </div>
+
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <ExpenseChart data={monthlyTrend} />
-          <CategoryChart data={categoryData} />
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Expenses by Category</h3>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => setCategoryMonth('current')}
+                  className={`px-3 py-1 text-sm rounded-lg transition duration-200 ${
+                    categoryMonth === 'current'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  onClick={() => setCategoryMonth(null)}
+                  className={`px-3 py-1 text-sm rounded-lg transition duration-200 ${
+                    categoryMonth === null
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Overall
+                </button>
+              </div>
+            </div>
+            <CategoryChart data={categoryData} />
+          </div>
         </div>
 
         {/* Recent Transactions */}

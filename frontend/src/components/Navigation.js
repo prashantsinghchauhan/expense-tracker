@@ -21,7 +21,7 @@ function Navigation({ user }) {
   const isActive = (path) => location.pathname === path;
 
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-200">
+    <nav className="fixed top-0 left-0 right-0 bg-white shadow-sm border-b border-gray-200 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex">
@@ -66,6 +66,17 @@ function Navigation({ user }) {
                 data-testid="nav-budgets"
               >
                 Budgets
+              </button>
+              <button
+                onClick={() => navigate('/edit-tracker')}
+                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                  isActive('/edit-tracker')
+                    ? 'border-indigo-500 text-gray-900'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                }`}
+                data-testid="nav-edit-tracker"
+              >
+                Edit Your Tracker
               </button>
             </div>
           </div>

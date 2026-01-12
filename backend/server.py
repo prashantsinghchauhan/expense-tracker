@@ -33,6 +33,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Dev flag: when True, backend will bypass auth and use a fake user.
+# By default this is enabled in local/dev environments so you can
+# test the app without going through the login flow.
+ENV = os.environ.get("ENV", "development").lower()
+DISABLE_AUTH = os.environ.get(
+    "DISABLE_AUTH",
+    "true" if ENV == "development" else "false"
+).lower() == "true"
+
 
 # ============= MODELS =============
 
@@ -70,12 +79,12 @@ class Expense(BaseModel):
 
 class ExpenseCreate(BaseModel):
     date: str
-    category: str
+    category: Optional[str] = None
     description: str
     amount: float
-    transaction_type: str
+    transaction_type: str  # "expense" or "income"
     payment_method: str
-    paid_by: Optional[str] = None
+    paid_by: str = Field(min_length=1)  # Now mandatory - must be a non-empty member name
     notes: Optional[str] = None
 
 
@@ -86,7 +95,7 @@ class ExpenseUpdate(BaseModel):
     amount: Optional[float] = None
     transaction_type: Optional[str] = None
     payment_method: Optional[str] = None
-    paid_by: Optional[str] = None
+    paid_by: Optional[str] = None  # Optional in update to allow partial updates
     notes: Optional[str] = None
 
 
@@ -96,67 +105,670 @@ class Budget(BaseModel):
     user_id: str
     category: str
     monthly_limit: float
+    year: int = Field(default_factory=lambda: datetime.now(timezone.utc).year)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class BudgetCreate(BaseModel):
     category: str
     monthly_limit: float
+    year: Optional[int] = None
 
 
 class BudgetUpdate(BaseModel):
     monthly_limit: float
 
 
+class Category(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PaidBy(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Reminder(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    name: str  # e.g., "Home EMI", "SIP Mutual Fund"
+    amount: float
+    category: str
+    paid_by: str
+    payment_method: str  # Cash, Credit Card, Debit Card, Bank Transfer, UPI
+    frequency: str = "monthly"  # Only monthly for now
+    start_month: str  # Format: YYYY-MM (e.g., "2026-01")
+    end_month: str  # Format: YYYY-MM (e.g., "2026-05")
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ReminderCreate(BaseModel):
+    name: str
+    amount: float
+    category: str
+    paid_by: str
+    payment_method: str  # Mandatory
+    frequency: str = "monthly"
+    start_month: str  # YYYY-MM
+    end_month: str  # YYYY-MM
+    is_active: bool = True
+
+
+class ReminderUpdate(BaseModel):
+    name: Optional[str] = None
+    amount: Optional[float] = None
+    category: Optional[str] = None
+    paid_by: Optional[str] = None
+    payment_method: Optional[str] = None
+    frequency: Optional[str] = None
+    start_month: Optional[str] = None
+    end_month: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ReminderExecution(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    reminder_id: str
+    user_id: str
+    year: int
+    month: int  # 1-12
+    transaction_id: str  # Links to the created expense transaction
+    executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    status: str = "completed"  # "completed" or "reverted"
+
+
+# ============= CATEGORY ENDPOINTS =============
+
+@api_router.get("/categories", response_model=List[Category])
+async def get_categories(request: Request):
+    """Get all user-defined categories"""
+    user = await get_current_user(request)
+
+    categories = await db.categories.find(
+        {"user_id": user.user_id},
+        {"_id": 0},
+    ).to_list(200)
+
+    for cat in categories:
+        if isinstance(cat.get("created_at"), str):
+            cat["created_at"] = datetime.fromisoformat(cat["created_at"])
+
+    return categories
+
+
+@api_router.post("/categories", response_model=Category)
+async def create_category(request: Request):
+    """Create a new category for the current user"""
+    user = await get_current_user(request)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name is required")
+
+    # Prevent duplicates (case-insensitive) per user
+    existing = await db.categories.find_one(
+        {"user_id": user.user_id, "name": {"$regex": f"^{name}$", "$options": "i"}},
+        {"_id": 0},
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Category already exists")
+
+    now = datetime.now(timezone.utc)
+    category = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.user_id,
+        "name": name,
+        "created_at": now.isoformat(),
+    }
+
+    await db.categories.insert_one(category)
+
+    category["created_at"] = now
+    return Category(**category)
+
+
+@api_router.delete("/categories/{category_id}")
+async def delete_category(category_id: str, request: Request):
+    """Delete a category if it is not used in any expenses or budgets"""
+    user = await get_current_user(request)
+
+    category = await db.categories.find_one(
+        {"id": category_id, "user_id": user.user_id},
+        {"_id": 0},
+    )
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    name = category["name"]
+
+    # Check usage in expenses and budgets
+    used_in_expenses = await db.expenses.find_one(
+        {"user_id": user.user_id, "category": name},
+        {"_id": 1},
+    )
+    used_in_budgets = await db.budgets.find_one(
+        {"user_id": user.user_id, "category": name},
+        {"_id": 1},
+    )
+
+    if used_in_expenses or used_in_budgets:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete category that is already used in transactions or budgets",
+        )
+
+    await db.categories.delete_one({"id": category_id, "user_id": user.user_id})
+    return {"message": "Category deleted successfully"}
+
+
+# ============= PAIDBY (MEMBERS) ENDPOINTS =============
+
+@api_router.get("/paidby", response_model=List[PaidBy])
+async def get_paidby_members(request: Request):
+    """Get all user-defined PaidBy members"""
+    user = await get_current_user(request)
+
+    members = await db.paidby.find(
+        {"user_id": user.user_id},
+        {"_id": 0},
+    ).to_list(200)
+
+    for member in members:
+        if isinstance(member.get("created_at"), str):
+            member["created_at"] = datetime.fromisoformat(member["created_at"])
+
+    return members
+
+
+@api_router.post("/paidby", response_model=PaidBy)
+async def create_paidby_member(request: Request):
+    """Create a new PaidBy member for the current user"""
+    user = await get_current_user(request)
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Member name is required")
+
+    # Prevent duplicates (case-insensitive) per user
+    existing = await db.paidby.find_one(
+        {"user_id": user.user_id, "name": {"$regex": f"^{name}$", "$options": "i"}},
+        {"_id": 0},
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Member already exists")
+
+    now = datetime.now(timezone.utc)
+    member = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.user_id,
+        "name": name,
+        "created_at": now.isoformat(),
+    }
+
+    await db.paidby.insert_one(member)
+
+    member["created_at"] = now
+    return PaidBy(**member)
+
+
+@api_router.delete("/paidby/{member_id}")
+async def delete_paidby_member(member_id: str, request: Request):
+    """Delete a PaidBy member if it is not used in any expenses"""
+    user = await get_current_user(request)
+
+    member = await db.paidby.find_one(
+        {"id": member_id, "user_id": user.user_id},
+        {"_id": 0},
+    )
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    name = member["name"]
+
+    # Check usage in expenses
+    used_in_expenses = await db.expenses.find_one(
+        {"user_id": user.user_id, "paid_by": name},
+        {"_id": 1},
+    )
+
+    if used_in_expenses:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete member that is already used in transactions",
+        )
+
+    await db.paidby.delete_one({"id": member_id, "user_id": user.user_id})
+    return {"message": "Member deleted successfully"}
+
+
+# ============= REMINDER ENDPOINTS =============
+
+@api_router.get("/reminders", response_model=List[Reminder])
+async def get_reminders(request: Request):
+    """Get all reminders for the current user"""
+    user = await get_current_user(request)
+
+    reminders = await db.reminders.find(
+        {"user_id": user.user_id},
+        {"_id": 0},
+    ).to_list(200)
+
+    for reminder in reminders:
+        if isinstance(reminder.get("created_at"), str):
+            reminder["created_at"] = datetime.fromisoformat(reminder["created_at"])
+
+    return reminders
+
+
+@api_router.get("/reminders/active")
+async def get_active_reminders(request: Request):
+    """Get active reminders for the current month that haven't been executed yet"""
+    user = await get_current_user(request)
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")  # YYYY-MM
+
+    # Get all active reminders within time window
+    reminders = await db.reminders.find(
+        {
+            "user_id": user.user_id,
+            "is_active": True,
+            "start_month": {"$lte": current_month},
+            "end_month": {"$gte": current_month},
+        },
+        {"_id": 0},
+    ).to_list(200)
+
+    # Get execution records for current month
+    current_year = now.year
+    current_month_num = now.month
+    executions = await db.reminder_executions.find(
+        {
+            "user_id": user.user_id,
+            "year": current_year,
+            "month": current_month_num,
+            "status": "completed",
+        },
+        {"_id": 0, "reminder_id": 1},
+    ).to_list(200)
+
+    executed_reminder_ids = {ex["reminder_id"] for ex in executions}
+
+    # Filter out reminders that have already been executed this month
+    active_reminders = [r for r in reminders if r["id"] not in executed_reminder_ids]
+
+    # Convert created_at strings to datetime
+    for reminder in active_reminders:
+        if isinstance(reminder.get("created_at"), str):
+            reminder["created_at"] = datetime.fromisoformat(reminder["created_at"])
+
+    return active_reminders
+
+
+@api_router.post("/reminders", response_model=Reminder)
+async def create_reminder(reminder_data: ReminderCreate, request: Request):
+    """Create a new reminder"""
+    user = await get_current_user(request)
+
+    # Validate month format (YYYY-MM)
+    try:
+        datetime.strptime(reminder_data.start_month, "%Y-%m")
+        datetime.strptime(reminder_data.end_month, "%Y-%m")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
+
+    if reminder_data.start_month > reminder_data.end_month:
+        raise HTTPException(status_code=400, detail="start_month must be before or equal to end_month")
+
+    now = datetime.now(timezone.utc)
+    reminder = {
+        "id": str(uuid.uuid4()),
+        "user_id": user.user_id,
+        "name": reminder_data.name,
+        "amount": reminder_data.amount,
+        "category": reminder_data.category,
+        "paid_by": reminder_data.paid_by,
+        "payment_method": reminder_data.payment_method, 
+        "frequency": reminder_data.frequency,
+        "start_month": reminder_data.start_month,
+        "end_month": reminder_data.end_month,
+        "is_active": reminder_data.is_active,
+        "created_at": now.isoformat(),
+    }
+
+    await db.reminders.insert_one(reminder)
+
+    reminder["created_at"] = now
+    return Reminder(**reminder)
+
+
+@api_router.put("/reminders/{reminder_id}", response_model=Reminder)
+async def update_reminder(reminder_id: str, reminder_data: ReminderUpdate, request: Request):
+    """Update a reminder"""
+    user = await get_current_user(request)
+
+    reminder = await db.reminders.find_one(
+        {"id": reminder_id, "user_id": user.user_id},
+        {"_id": 0},
+    )
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    # Validate month formats if provided
+    update_dict = reminder_data.model_dump(exclude_unset=True)
+    if "start_month" in update_dict:
+        try:
+            datetime.strptime(update_dict["start_month"], "%Y-%m")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_month format. Use YYYY-MM")
+    if "end_month" in update_dict:
+        try:
+            datetime.strptime(update_dict["end_month"], "%Y-%m")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_month format. Use YYYY-MM")
+
+    # Validate month order
+    start_month = update_dict.get("start_month", reminder["start_month"])
+    end_month = update_dict.get("end_month", reminder["end_month"])
+    if start_month > end_month:
+        raise HTTPException(status_code=400, detail="start_month must be before or equal to end_month")
+
+    await db.reminders.update_one(
+        {"id": reminder_id, "user_id": user.user_id},
+        {"$set": update_dict}
+    )
+
+    updated = await db.reminders.find_one(
+        {"id": reminder_id, "user_id": user.user_id},
+        {"_id": 0},
+    )
+    if isinstance(updated.get("created_at"), str):
+        updated["created_at"] = datetime.fromisoformat(updated["created_at"])
+
+    return Reminder(**updated)
+
+
+@api_router.delete("/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: str, request: Request):
+    """Delete a reminder (execution history is preserved for audit)"""
+    user = await get_current_user(request)
+
+    result = await db.reminders.delete_one({"id": reminder_id, "user_id": user.user_id})
+
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    return {"message": "Reminder deleted successfully"}
+
+
+@api_router.post("/reminders/{reminder_id}/execute")
+async def execute_reminder(reminder_id: str, request: Request):
+    """Execute a reminder for the current month - creates expense transaction and execution record"""
+    user = await get_current_user(request)
+    now = datetime.now(timezone.utc)
+    current_year = now.year
+    current_month_num = now.month
+    current_date = now.strftime("%Y-%m-%d")
+
+    # Get reminder
+    reminder = await db.reminders.find_one(
+        {"id": reminder_id, "user_id": user.user_id},
+        {"_id": 0},
+    )
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    # Validate reminder is active and within time window
+    current_month_str = now.strftime("%Y-%m")
+    if not reminder.get("is_active", True):
+        raise HTTPException(status_code=400, detail="Reminder is not active")
+    if reminder["start_month"] > current_month_str or reminder["end_month"] < current_month_str:
+        raise HTTPException(status_code=400, detail="Reminder is not active for the current month")
+
+    # Check if already executed this month
+    existing_execution = await db.reminder_executions.find_one(
+        {
+            "reminder_id": reminder_id,
+            "user_id": user.user_id,
+            "year": current_year,
+            "month": current_month_num,
+            "status": "completed",
+        },
+        {"_id": 1},
+    )
+    if existing_execution:
+        raise HTTPException(status_code=400, detail="Reminder already executed for this month")
+
+    # Create expense transaction
+    expense_id = str(uuid.uuid4())
+    expense = {
+        "id": expense_id,
+        "user_id": user.user_id,
+        "date": current_date,
+        "category": reminder["category"],
+        "description": reminder["name"],
+        "amount": reminder["amount"],
+        "transaction_type": "expense",
+        "payment_method": reminder["payment_method"],  # Use reminder's payment method
+        "paid_by": reminder["paid_by"],
+        "notes": f"Auto-generated from reminder: {reminder['name']}",
+        "created_at": now.isoformat(),
+    }
+
+    await db.expenses.insert_one(expense)
+
+    # Create execution record
+    execution = {
+        "id": str(uuid.uuid4()),
+        "reminder_id": reminder_id,
+        "user_id": user.user_id,
+        "year": current_year,
+        "month": current_month_num,
+        "transaction_id": expense_id,
+        "executed_at": now.isoformat(),
+        "status": "completed",
+    }
+
+    await db.reminder_executions.insert_one(execution)
+
+    return {
+        "message": "Reminder executed successfully",
+        "transaction_id": expense_id,
+        "execution_id": execution["id"],
+    }
+
+
+@api_router.get("/reminders/{reminder_id}/history")
+async def get_reminder_history(reminder_id: str, request: Request):
+    """Get execution history for a reminder"""
+    user = await get_current_user(request)
+
+    # Verify reminder belongs to user
+    reminder = await db.reminders.find_one(
+        {"id": reminder_id, "user_id": user.user_id},
+        {"_id": 1},
+    )
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+
+    executions = await db.reminder_executions.find(
+        {"reminder_id": reminder_id, "user_id": user.user_id},
+        {"_id": 0},
+    ).sort([("year", -1), ("month", -1)]).to_list(100)
+
+    for ex in executions:
+        if isinstance(ex.get("executed_at"), str):
+            ex["executed_at"] = datetime.fromisoformat(ex["executed_at"])
+
+    return executions
+
+
 # ============= AUTH HELPERS =============
 
 async def get_current_user(request: Request) -> User:
-    """Extract and validate user from session token (cookie or header)"""
-    # Try to get session_token from cookie first
+    """
+    Extract and validate user.
+    In DEV mode, always return ONE fixed user.
+    """
+
+    # ===== DEV MODE (FIXED) =====
+    if DISABLE_AUTH:
+        dev_user_id = os.environ.get("DEV_USER_ID", "dev_fixed_user")
+        dev_email = os.environ.get("DEV_USER_EMAIL", "dev@example.com")
+        dev_name = os.environ.get("DEV_USER_NAME", "Dev User")
+
+        user_doc = await db.users.find_one(
+            {"user_id": dev_user_id},
+            {"_id": 0}
+        )
+
+        if not user_doc:
+            now = datetime.now(timezone.utc)
+            user_doc = {
+                "user_id": dev_user_id,
+                "email": dev_email,
+                "name": dev_name,
+                "picture": None,
+                "created_at": now.isoformat(),
+            }
+            await db.users.insert_one(user_doc)
+
+        if isinstance(user_doc.get("created_at"), str):
+            user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
+
+        return User(**user_doc)
+
+    # ===== NORMAL AUTH (PRODUCTION) =====
     session_token = request.cookies.get("session_token")
-    
-    # Fallback to Authorization header
+
     if not session_token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             session_token = auth_header.replace("Bearer ", "")
-    
+
     if not session_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    # Find session in database
+
     session_doc = await db.user_sessions.find_one(
         {"session_token": session_token},
         {"_id": 0}
     )
-    
+
     if not session_doc:
         raise HTTPException(status_code=401, detail="Invalid session")
-    
-    # Check if session is expired
+
     expires_at = session_doc["expires_at"]
     if isinstance(expires_at, str):
         expires_at = datetime.fromisoformat(expires_at)
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    
+
     if expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Session expired")
-    
-    # Get user
+
     user_doc = await db.users.find_one(
         {"user_id": session_doc["user_id"]},
         {"_id": 0}
     )
-    
+
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # Convert created_at to datetime if it's a string
+
     if isinstance(user_doc.get("created_at"), str):
         user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
-    
+
     return User(**user_doc)
+
+
+# async def get_current_user(request: Request) -> User:
+#     """Extract and validate user from session token (cookie or header)"""
+#     # ===== DEV MODE: BYPASS AUTH COMPLETELY =====
+#     # When DISABLE_AUTH is True, we skip all session checks and always
+#     # return a fake/dev user. This is ONLY for local development.
+#     if DISABLE_AUTH:
+#         dev_email = os.environ.get("DEV_USER_EMAIL", "dev@example.com")
+#         dev_name = os.environ.get("DEV_USER_NAME", "Dev User")
+
+#         user_doc = await db.users.find_one(
+#             {"email": dev_email},
+#             {"_id": 0}
+#         )
+
+#         if not user_doc:
+#             user_id = f"dev_{uuid.uuid4().hex[:8]}"
+#             now = datetime.now(timezone.utc)
+#             user_doc = {
+#                 "user_id": user_id,
+#                 "email": dev_email,
+#                 "name": dev_name,
+#                 "picture": None,
+#                 "created_at": now,
+#             }
+
+#             insert_doc = dict(user_doc)
+#             insert_doc["created_at"] = now.isoformat()
+#             await db.users.insert_one(insert_doc)
+
+#         if isinstance(user_doc.get("created_at"), str):
+#             user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
+
+#         return User(**user_doc)
+
+#     # ===== NORMAL AUTH FLOW (production) =====
+#     # Try to get session_token from cookie first
+#     session_token = request.cookies.get("session_token")
+    
+#     # Fallback to Authorization header
+#     if not session_token:
+#         auth_header = request.headers.get("Authorization")
+#         if auth_header and auth_header.startswith("Bearer "):
+#             session_token = auth_header.replace("Bearer ", "")
+    
+#     if not session_token:
+#         raise HTTPException(status_code=401, detail="Not authenticated")
+    
+#     # Find session in database
+#     session_doc = await db.user_sessions.find_one(
+#         {"session_token": session_token},
+#         {"_id": 0}
+#     )
+    
+#     if not session_doc:
+#         raise HTTPException(status_code=401, detail="Invalid session")
+    
+#     # Check if session is expired
+#     expires_at = session_doc["expires_at"]
+#     if isinstance(expires_at, str):
+#         expires_at = datetime.fromisoformat(expires_at)
+#     if expires_at.tzinfo is None:
+#         expires_at = expires_at.replace(tzinfo=timezone.utc)
+    
+#     if expires_at < datetime.now(timezone.utc):
+#         raise HTTPException(status_code=401, detail="Session expired")
+    
+#     # Get user
+#     user_doc = await db.users.find_one(
+#         {"user_id": session_doc["user_id"]},
+#         {"_id": 0}
+#     )
+    
+#     if not user_doc:
+#         raise HTTPException(status_code=404, detail="User not found")
+    
+#     # Convert created_at to datetime if it's a string
+#     if isinstance(user_doc.get("created_at"), str):
+#         user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
+    
+#     return User(**user_doc)
 
 
 # ============= AUTH ENDPOINTS =============
@@ -229,8 +841,8 @@ async def exchange_session(request: Request, response: Response):
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=False,         # <-- local dev ke liye False
+        samesite="lax",       # <-- local dev ke liye lax
         path="/",
         max_age=7 * 24 * 60 * 60  # 7 days
     )
@@ -279,6 +891,13 @@ async def create_expense(expense_data: ExpenseCreate, request: Request):
     user = await get_current_user(request)
     
     expense_dict = expense_data.model_dump()
+
+    # ===== INCOME CATEGORY NORMALIZATION =====
+    # For income transactions, always treat category as "Credit"
+    # to separate it from normal expense categories.
+    if expense_dict.get("transaction_type") == "income":
+        expense_dict["category"] = "Credit"
+
     expense_obj = Expense(user_id=user.user_id, **expense_dict)
     
     doc = expense_obj.model_dump()
@@ -286,6 +905,63 @@ async def create_expense(expense_data: ExpenseCreate, request: Request):
     
     await db.expenses.insert_one(doc)
     return expense_obj
+
+
+@api_router.post("/expenses/bulk", response_model=List[Expense])
+async def create_expenses_bulk(expenses_data: List[ExpenseCreate], request: Request):
+    """Create multiple expenses in a single request.
+
+    Empty/invalid rows are ignored safely.
+    """
+    user = await get_current_user(request)
+
+    valid_expenses: List[Expense] = []
+    docs_to_insert = []
+
+    for item in expenses_data:
+        data = item.model_dump()
+
+        # Basic validation / ignore "empty" rows
+        if not data.get("date") or not data.get("description"):
+            continue
+        try:
+            amount = float(data.get("amount", 0))
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        if not data.get("payment_method"):
+            continue
+        # PaidBy is now mandatory
+        paid_by = data.get("paid_by", "").strip()
+        if not paid_by:
+            continue
+
+        # Normalize income category
+        if data.get("transaction_type") == "income":
+            data["category"] = "Credit"
+
+        expense_obj = Expense(
+            user_id=user.user_id,
+            date=data["date"],
+            category=data.get("category") or "Other",
+            description=data["description"],
+            amount=amount,
+            transaction_type=data.get("transaction_type") or "expense",
+            payment_method=data["payment_method"],
+            paid_by=paid_by,  # Now mandatory, validated above
+            notes=data.get("notes"),
+        )
+
+        valid_expenses.append(expense_obj)
+        doc = expense_obj.model_dump()
+        doc["created_at"] = doc["created_at"].isoformat()
+        docs_to_insert.append(doc)
+
+    if docs_to_insert:
+        await db.expenses.insert_many(docs_to_insert)
+
+    return valid_expenses
 
 
 @api_router.get("/expenses", response_model=List[Expense])
@@ -475,16 +1151,21 @@ async def create_budget(budget_data: BudgetCreate, request: Request):
     """Set budget for a category"""
     user = await get_current_user(request)
     
-    # Check if budget already exists for this category
+    # Resolve target year (default: current year)
+    target_year = budget_data.year or datetime.now(timezone.utc).year
+
+    # Check if budget already exists for this category and year
     existing = await db.budgets.find_one({
         "user_id": user.user_id,
-        "category": budget_data.category
+        "category": budget_data.category,
+        "year": target_year,
     })
     
     if existing:
         raise HTTPException(status_code=400, detail="Budget already exists for this category. Use PUT to update.")
     
     budget_dict = budget_data.model_dump()
+    budget_dict["year"] = target_year
     budget_obj = Budget(user_id=user.user_id, **budget_dict)
     
     doc = budget_obj.model_dump()
@@ -495,14 +1176,18 @@ async def create_budget(budget_data: BudgetCreate, request: Request):
 
 
 @api_router.get("/budgets", response_model=List[Budget])
-async def get_budgets(request: Request):
-    """Get all budgets"""
+async def get_budgets(request: Request, year: Optional[int] = None):
+    """Get all budgets, optionally filtered by year"""
     user = await get_current_user(request)
-    
+
+    query = {"user_id": user.user_id}
+    if year is not None:
+        query["year"] = year
+
     budgets = await db.budgets.find(
-        {"user_id": user.user_id},
+        query,
         {"_id": 0}
-    ).to_list(100)
+    ).to_list(200)
     
     for budget in budgets:
         if isinstance(budget.get('created_at'), str):
@@ -556,10 +1241,11 @@ async def get_budget_alerts(request: Request):
     user = await get_current_user(request)
     
     current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    current_year = datetime.now(timezone.utc).year
     
-    # Get all budgets
+    # Get all budgets for the current year
     budgets = await db.budgets.find(
-        {"user_id": user.user_id},
+        {"user_id": user.user_id, "year": current_year},
         {"_id": 0}
     ).to_list(100)
     
@@ -608,8 +1294,8 @@ app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
     allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

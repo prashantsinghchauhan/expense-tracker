@@ -20,9 +20,10 @@ function CategoryChart({ data }) {
     value: item.total
   }));
 
+  const total = chartData.reduce((sum, item) => sum + item.value, 0);
+
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Expenses by Category</h3>
       <ResponsiveContainer width="100%" height={300}>
         <PieChart>
           <Pie
@@ -30,7 +31,13 @@ function CategoryChart({ data }) {
             cx="50%"
             cy="50%"
             labelLine={false}
-            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+            label={({ name, value }) => {
+              // Show amount instead of percentage
+              const formatted = `₹${value.toLocaleString('en-IN')}`;
+              // Truncate long category names for better display
+              const displayName = name.length > 12 ? name.substring(0, 10) + '...' : name;
+              return `${displayName}\n${formatted}`;
+            }}
             outerRadius={80}
             fill="#8884d8"
             dataKey="value"
@@ -40,8 +47,18 @@ function CategoryChart({ data }) {
             ))}
           </Pie>
           <Tooltip formatter={(value) => `₹${value.toLocaleString('en-IN')}`} />
+          <Legend 
+            formatter={(value, entry) => {
+              const item = chartData.find(d => d.name === value);
+              return item ? `${value}: ₹${item.value.toLocaleString('en-IN')}` : value;
+            }}
+          />
         </PieChart>
       </ResponsiveContainer>
+      {/* Show total below chart */}
+      <div className="mt-4 text-center text-sm text-gray-600">
+        Total: <span className="font-semibold text-gray-900">₹{total.toLocaleString('en-IN')}</span>
+      </div>
     </div>
   );
 }

@@ -1,12 +1,11 @@
 import React from 'react';
 
-const CATEGORIES = ['Food', 'Fuel', 'Travel', 'Rent', 'Shopping', 'Entertainment', 'Bills', 'Investment', 'Health', 'Other'];
-
-function ExpenseFilters({ filters, setFilters }) {
+// Categories and paidByMembers are passed from the parent
+function ExpenseFilters({ filters, setFilters, categories, paidByMembers }) {
   return (
     <div className="bg-white rounded-lg shadow p-6 mb-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Filters</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         {/* Search */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
@@ -30,7 +29,7 @@ function ExpenseFilters({ filters, setFilters }) {
             data-testid="filter-category-select"
           >
             <option value="">All Categories</option>
-            {CATEGORIES.map(cat => (
+            {(categories || []).map(cat => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
@@ -48,6 +47,22 @@ function ExpenseFilters({ filters, setFilters }) {
             <option value="">All Types</option>
             <option value="expense">Expense</option>
             <option value="income">Income</option>
+          </select>
+        </div>
+
+        {/* Paid By Filter */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Paid By</label>
+          <select
+            value={filters.paid_by}
+            onChange={(e) => setFilters({ ...filters, paid_by: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            data-testid="filter-paid-by-select"
+          >
+            <option value="">All Members</option>
+            {(paidByMembers || []).map(member => (
+              <option key={member} value={member}>{member}</option>
+            ))}
           </select>
         </div>
 
@@ -77,10 +92,10 @@ function ExpenseFilters({ filters, setFilters }) {
       </div>
 
       {/* Clear Filters */}
-      {(filters.search || filters.category || filters.transaction_type || filters.date_from || filters.date_to) && (
+      {(filters.search || filters.category || filters.transaction_type || filters.paid_by || filters.date_from || filters.date_to) && (
         <div className="mt-4">
           <button
-            onClick={() => setFilters({ search: '', category: '', transaction_type: '', date_from: '', date_to: '' })}
+            onClick={() => setFilters({ search: '', category: '', transaction_type: '', paid_by: '', date_from: '', date_to: '' })}
             className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
             data-testid="clear-filters-button"
           >

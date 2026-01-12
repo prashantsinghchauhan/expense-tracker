@@ -5,6 +5,7 @@ import AuthCallback from './pages/AuthCallback';
 import Dashboard from './pages/Dashboard';
 import ExpenseList from './pages/ExpenseList';
 import BudgetSettings from './pages/BudgetSettings';
+import EditYourTracker from './pages/EditYourTracker';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
 
@@ -24,6 +25,7 @@ function AppRouter() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/expenses" element={<ProtectedRoute><ExpenseList /></ProtectedRoute>} />
       <Route path="/budgets" element={<ProtectedRoute><BudgetSettings /></ProtectedRoute>} />
+      <Route path="/edit-tracker" element={<ProtectedRoute><EditYourTracker /></ProtectedRoute>} />
     </Routes>
   );
 }

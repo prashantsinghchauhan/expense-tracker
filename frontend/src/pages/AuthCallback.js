@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_API_BASE_URL;
 
 function AuthCallback() {
   const navigate = useNavigate();
@@ -16,9 +16,15 @@ function AuthCallback() {
     const processSession = async () => {
       try {
         // Extract session_id from URL fragment
-        const hash = location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        const sessionId = params.get('session_id');
+        let sessionId = null;
+        if (location.hash) {
+          const params = new URLSearchParams(location.hash.substring(1));
+          sessionId = params.get('session_id');
+        }
+        if (!sessionId && location.search) {
+          const params = new URLSearchParams(location.search);
+          sessionId = params.get('session_id');
+        }
 
         if (!sessionId) {
           navigate('/login');

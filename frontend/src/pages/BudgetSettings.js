@@ -4,22 +4,24 @@ import Navigation from '../components/Navigation';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
-const CATEGORIES = ['Food', 'Fuel', 'Travel', 'Rent', 'Shopping', 'Entertainment', 'Bills', 'Investment', 'Health', 'Other'];
-
 function BudgetSettings({ user }) {
   const [budgets, setBudgets] = useState([]);
-  const [newBudget, setNewBudget] = useState({ category: '', monthly_limit: '' });
+  const [newBudget, setNewBudget] = useState({ category: '', monthly_limit: '', year: new Date().getFullYear() });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [budgetYear, setBudgetYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
-    loadBudgets();
-  }, []);
+    loadBudgets(budgetYear);
+    loadCategories();
+  }, [budgetYear]);
 
-  const loadBudgets = async () => {
+  const loadBudgets = async (year) => {
     try {
       setLoading(true);
       const response = await axios.get(`${BACKEND_URL}/api/budgets`, {
+        params: { year },
         withCredentials: true
       });
       setBudgets(response.data);
@@ -27,6 +29,25 @@ function BudgetSettings({ user }) {
       console.error('Error loading budgets:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      // Load all categories (defaults + user-created) for budget selection
+      const DEFAULT_CATEGORIES = ['Food', 'Fuel', 'Travel', 'Rent', 'Shopping', 'Entertainment', 'Bills', 'Investment', 'Health', 'Other'];
+      const res = await axios.get(`${BACKEND_URL}/api/categories`, {
+        withCredentials: true
+      });
+      const apiNames = Array.isArray(res.data) ? res.data.map((c) => c.name) : [];
+      // Merge defaults with user categories
+      const allCategories = Array.from(new Set([...DEFAULT_CATEGORIES, ...apiNames]));
+      setCategories(allCategories);
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      // Fallback to defaults
+      const DEFAULT_CATEGORIES = ['Food', 'Fuel', 'Travel', 'Rent', 'Shopping', 'Entertainment', 'Bills', 'Investment', 'Health', 'Other'];
+      setCategories(DEFAULT_CATEGORIES);
     }
   };
 
@@ -40,12 +61,13 @@ function BudgetSettings({ user }) {
         `${BACKEND_URL}/api/budgets`,
         {
           category: newBudget.category,
-          monthly_limit: parseFloat(newBudget.monthly_limit)
+          monthly_limit: parseFloat(newBudget.monthly_limit),
+          year: newBudget.year || budgetYear
         },
         { withCredentials: true }
       );
-      setNewBudget({ category: '', monthly_limit: '' });
-      loadBudgets();
+      setNewBudget({ category: '', monthly_limit: '', year: budgetYear });
+      loadBudgets(budgetYear);
     } catch (error) {
       console.error('Error adding budget:', error);
       alert(error.response?.data?.detail || 'Failed to add budget');
@@ -61,7 +83,7 @@ function BudgetSettings({ user }) {
         { monthly_limit: parseFloat(newLimit) },
         { withCredentials: true }
       );
-      loadBudgets();
+      loadBudgets(budgetYear);
     } catch (error) {
       console.error('Error updating budget:', error);
       alert('Failed to update budget');
@@ -75,20 +97,18 @@ function BudgetSettings({ user }) {
       await axios.delete(`${BACKEND_URL}/api/budgets/${budgetId}`, {
         withCredentials: true
       });
-      loadBudgets();
+      loadBudgets(budgetYear);
     } catch (error) {
       console.error('Error deleting budget:', error);
       alert('Failed to delete budget');
     }
   };
 
-  const availableCategories = CATEGORIES.filter(
-    cat => !budgets.some(b => b.category === cat)
-  );
+  const availableCategories = categories.filter(cat => !budgets.some(b => b.category === cat));
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 pt-16">
         <Navigation user={user} />
         <div className="flex items-center justify-center h-[calc(100vh-64px)]">
           <div className="text-center">
@@ -101,13 +121,32 @@ function BudgetSettings({ user }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pt-16">
       <Navigation user={user} />
       
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900" data-testid="budgets-title">Budget Settings</h1>
-          <p className="text-gray-600 mt-1">Set monthly spending limits for each category</p>
+          <p className="text-gray-600 mt-1">Set monthly and yearly spending limits for each category</p>
+        </div>
+
+        {/* Budget year selector */}
+        <div className="mb-4 flex items-center space-x-3">
+          <label className="text-sm font-medium text-gray-700">Budget Year:</label>
+          <select
+            value={budgetYear}
+            onChange={(e) => setBudgetYear(parseInt(e.target.value, 10))}
+            className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          >
+            {Array.from({ length: 5 }).map((_, idx) => {
+              const year = new Date().getFullYear() - 2 + idx;
+              return (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              );
+            })}
+          </select>
         </div>
 
         {/* Add New Budget */}
@@ -137,6 +176,14 @@ function BudgetSettings({ user }) {
               required
               data-testid="budget-limit-input"
             />
+            <input
+              type="number"
+              value={newBudget.year}
+              onChange={(e) => setNewBudget({ ...newBudget, year: e.target.value })}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              min="2000"
+              max="2100"
+            />
             <button
               type="submit"
               disabled={saving}
@@ -151,11 +198,11 @@ function BudgetSettings({ user }) {
         {/* Existing Budgets */}
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">Current Budgets</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Current Budgets ({budgetYear})</h2>
           </div>
           {budgets.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500">
-              No budgets set yet. Add your first budget above!
+              No budgets set yet for this year. Add your first budget above!
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
@@ -163,7 +210,9 @@ function BudgetSettings({ user }) {
                 <div key={budget.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50" data-testid={`budget-item-${budget.category}`}>
                   <div className="flex-1">
                     <h3 className="text-lg font-medium text-gray-900">{budget.category}</h3>
-                    <p className="text-sm text-gray-500">Monthly limit: ₹{budget.monthly_limit.toLocaleString('en-IN')}</p>
+                    <p className="text-sm text-gray-500">
+                      Year: {budget.year} · Monthly limit: ₹{budget.monthly_limit.toLocaleString('en-IN')}
+                    </p>
                   </div>
                   <div className="flex items-center space-x-4">
                     <input
@@ -206,10 +255,11 @@ function BudgetSettings({ user }) {
               <h3 className="text-sm font-medium text-blue-800">About Budget Alerts</h3>
               <div className="mt-2 text-sm text-blue-700">
                 <ul className="list-disc list-inside space-y-1">
-                  <li>Set monthly spending limits for each category</li>
+                  <li>Set monthly spending limits for each category per year</li>
                   <li>Get alerts on your dashboard when you exceed 80% of your budget</li>
                   <li>Track your spending patterns and stay within your limits</li>
                   <li>Update limits anytime by clicking on the amount and typing a new value</li>
+                  <li>To manage categories, go to "Edit Your Tracker" in the navigation</li>
                 </ul>
               </div>
             </div>

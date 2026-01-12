@@ -12,36 +12,18 @@ function ExpenseList({ user }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState([]);
+  const [paidByMembers, setPaidByMembers] = useState([]);
   const [filters, setFilters] = useState({
     search: '',
     category: '',
     transaction_type: '',
+    paid_by: '',
     date_from: '',
     date_to: ''
   });
 
-  useEffect(() => {
-    loadExpenses();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [expenses, filters]);
-
-  const loadExpenses = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`${BACKEND_URL}/api/expenses`, {
-        withCredentials: true
-      });
-      setExpenses(response.data);
-    } catch (error) {
-      console.error('Error loading expenses:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Move applyFilters above its usage!
   const applyFilters = () => {
     let filtered = [...expenses];
 
@@ -68,7 +50,62 @@ function ExpenseList({ user }) {
       filtered = filtered.filter(e => e.date <= filters.date_to);
     }
 
+    if (filters.paid_by) {
+      filtered = filtered.filter(e => e.paid_by === filters.paid_by);
+    }
+
     setFilteredExpenses(filtered);
+  };
+
+  useEffect(() => {
+    loadExpenses();
+    loadCategories();
+    loadPaidByMembers();
+  }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [expenses, filters]); // Correct dependencies
+
+  const loadExpenses = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${BACKEND_URL}/api/expenses`, {
+        withCredentials: true
+      });
+      setExpenses(response.data);
+    } catch (error) {
+      console.error('Error loading expenses:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      const DEFAULT_CATEGORIES = ['Food', 'Fuel', 'Travel', 'Rent', 'Shopping', 'Entertainment', 'Bills', 'Investment', 'Health', 'Other'];
+      const res = await axios.get(`${BACKEND_URL}/api/categories`, {
+        withCredentials: true
+      });
+      const apiNames = Array.isArray(res.data) ? res.data.map((c) => c.name) : [];
+      setCategories(Array.from(new Set([...DEFAULT_CATEGORIES, ...apiNames])));
+    } catch (error) {
+      console.error('Error loading categories:', error);
+      // Non-fatal – filters will just show "All Categories"
+    }
+  };
+
+  const loadPaidByMembers = async () => {
+    try {
+      const res = await axios.get(`${BACKEND_URL}/api/paidby`, {
+        withCredentials: true
+      });
+      const memberNames = Array.isArray(res.data) ? res.data.map((m) => m.name) : [];
+      setPaidByMembers(memberNames);
+    } catch (error) {
+      console.error('Error loading PaidBy members:', error);
+      setPaidByMembers([]);
+    }
   };
 
   const handleDelete = async (expenseId) => {
@@ -111,7 +148,7 @@ function ExpenseList({ user }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pt-16">
       <Navigation user={user} />
       
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -121,7 +158,86 @@ function ExpenseList({ user }) {
         </div>
 
         {/* Filters */}
-        <ExpenseFilters filters={filters} setFilters={setFilters} />
+        <ExpenseFilters filters={filters} setFilters={setFilters} categories={categories} paidByMembers={paidByMembers} />
+
+        {/* Summary Cards (Sticky) */}
+        {filteredExpenses.length > 0 && (
+          <div className="sticky top-20 z-40 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-lg shadow-md">
+              <div className="bg-white rounded-lg p-4">
+                <p className="text-sm font-medium text-gray-600">Total Expenses</p>
+                <p className="text-2xl font-bold text-red-600 mt-1">
+                  ₹{filteredExpenses
+                    .filter(e => e.transaction_type === 'expense')
+                    .reduce((sum, e) => sum + e.amount, 0)
+                    .toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg p-4">
+                <p className="text-sm font-medium text-gray-600">Total Income</p>
+                <p className="text-2xl font-bold text-green-600 mt-1">
+                  ₹{filteredExpenses
+                    .filter(e => e.transaction_type === 'income')
+                    .reduce((sum, e) => sum + e.amount, 0)
+                    .toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg p-4">
+                <p className="text-sm font-medium text-gray-600">Balance</p>
+                <p className={`text-2xl font-bold mt-1 ${
+                  (filteredExpenses.filter(e => e.transaction_type === 'income').reduce((sum, e) => sum + e.amount, 0) -
+                   filteredExpenses.filter(e => e.transaction_type === 'expense').reduce((sum, e) => sum + e.amount, 0)) >= 0
+                    ? 'text-green-600'
+                    : 'text-red-600'
+                }`}>
+                  ₹{(filteredExpenses.filter(e => e.transaction_type === 'income').reduce((sum, e) => sum + e.amount, 0) -
+                     filteredExpenses.filter(e => e.transaction_type === 'expense').reduce((sum, e) => sum + e.amount, 0))
+                    .toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg p-4">
+                <p className="text-sm font-medium text-gray-600">Transactions</p>
+                <p className="text-2xl font-bold text-indigo-600 mt-1">
+                  {filteredExpenses.length}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Member-wise Breakdown (when Paid By filter is active) */}
+        {filters.paid_by && filteredExpenses.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              How {filters.paid_by}'s money was spent
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(() => {
+                // Calculate category-wise breakdown for selected member
+                const categoryBreakdown = {};
+                filteredExpenses
+                  .filter(e => e.transaction_type === 'expense')
+                  .forEach(e => {
+                    if (!categoryBreakdown[e.category]) {
+                      categoryBreakdown[e.category] = 0;
+                    }
+                    categoryBreakdown[e.category] += e.amount;
+                  });
+                
+                return Object.entries(categoryBreakdown)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([category, amount]) => (
+                    <div key={category} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <span className="font-medium text-gray-700">{category}</span>
+                      <span className="font-semibold text-gray-900">
+                        ₹{amount.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  ));
+              })()}
+            </div>
+          </div>
+        )}
 
         {/* Expenses Table */}
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -135,13 +251,14 @@ function ExpenseList({ user }) {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paid By</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredExpenses.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
                       No transactions found. Add your first transaction!
                     </td>
                   </tr>
@@ -177,6 +294,9 @@ function ExpenseList({ user }) {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {expense.payment_method}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
+                        {expense.paid_by || '-'}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button
                           onClick={() => handleEdit(expense)}
@@ -201,28 +321,6 @@ function ExpenseList({ user }) {
           </div>
         </div>
 
-        {/* Summary */}
-        {filteredExpenses.length > 0 && (
-          <div className="mt-4 bg-white rounded-lg shadow p-4">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">Total Transactions: {filteredExpenses.length}</span>
-              <div className="flex space-x-6">
-                <span className="text-red-600 font-semibold">
-                  Expenses: -₹{filteredExpenses
-                    .filter(e => e.transaction_type === 'expense')
-                    .reduce((sum, e) => sum + e.amount, 0)
-                    .toLocaleString('en-IN')}
-                </span>
-                <span className="text-green-600 font-semibold">
-                  Income: +₹{filteredExpenses
-                    .filter(e => e.transaction_type === 'income')
-                    .reduce((sum, e) => sum + e.amount, 0)
-                    .toLocaleString('en-IN')}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Floating Add Button */}
         <button
