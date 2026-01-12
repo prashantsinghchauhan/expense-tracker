@@ -23,12 +23,11 @@ db = client[os.environ['DB_NAME']]
 # Create the main app without a prefix
 app = FastAPI()
 
-@app.get("/")
-def root():
+@app.get("/api/health")
+def health():
     return {
         "status": "ok",
-        "service": "expense-tracker-backend",
-        "env": "production"
+        "service": "expense-tracker-backend"
     }
 
 
