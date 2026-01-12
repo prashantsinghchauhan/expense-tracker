@@ -84,3 +84,7 @@ frontend/node_modules/.cache/default-development/1.pack
 # Emergent / Agent specific
 .emergent/
 .ruff_cache/
+
+.env
+frontend/.env
+backend/.env
