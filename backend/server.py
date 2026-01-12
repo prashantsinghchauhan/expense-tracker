@@ -23,6 +23,15 @@ db = client[os.environ['DB_NAME']]
 # Create the main app without a prefix
 app = FastAPI()
 
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "service": "expense-tracker-backend",
+        "env": "production"
+    }
+
+
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
@@ -567,7 +576,7 @@ async def execute_reminder(reminder_id: str, request: Request):
     }
 
     await db.expenses.insert_one(expense)
-
+    #hello 
     # Create execution record
     execution = {
         "id": str(uuid.uuid4()),
