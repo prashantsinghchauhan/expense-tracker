@@ -2,7 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_API_BASE_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const DISABLE_AUTH = process.env.REACT_APP_DISABLE_AUTH === "true";
 
 function AuthCallback() {
   const navigate = useNavigate();
@@ -12,6 +13,13 @@ function AuthCallback() {
   useEffect(() => {
     if (hasProcessed.current) return;
     hasProcessed.current = true;
+
+    
+    // ✅ DEV MODE: skip Google auth completely
+    if (DISABLE_AUTH) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
 
     const processSession = async () => {
       try {
