@@ -44,11 +44,11 @@ logger = logging.getLogger(__name__)
 # Dev flag: when True, backend will bypass auth and use a fake user.
 # By default this is enabled in local/dev environments so you can
 # test the app without going through the login flow.
-ENV = os.environ.get("ENV", "development").lower()
-DISABLE_AUTH = os.environ.get(
-    "DISABLE_AUTH",
-    "true" if ENV == "development" else "false"
-).lower() == "true"
+# ENV = os.environ.get("ENV", "development").lower()
+# DISABLE_AUTH = os.environ.get(
+#     "DISABLE_AUTH",
+#     "true" if ENV == "development" else "false"
+# ).lower() == "true"
 
 
 # ============= MODELS =============
@@ -631,31 +631,31 @@ async def get_current_user(request: Request) -> User:
     """
 
     # ===== DEV MODE (FIXED) =====
-    if DISABLE_AUTH:
-        dev_user_id = os.environ.get("DEV_USER_ID", "dev_fixed_user")
-        dev_email = os.environ.get("DEV_USER_EMAIL", "dev@example.com")
-        dev_name = os.environ.get("DEV_USER_NAME", "Dev User")
+    # if DISABLE_AUTH:
+    #     dev_user_id = os.environ.get("DEV_USER_ID", "dev_fixed_user")
+    #     dev_email = os.environ.get("DEV_USER_EMAIL", "dev@example.com")
+    #     dev_name = os.environ.get("DEV_USER_NAME", "Dev User")
 
-        user_doc = await db.users.find_one(
-            {"user_id": dev_user_id},
-            {"_id": 0}
-        )
+    #     user_doc = await db.users.find_one(
+    #         {"user_id": dev_user_id},
+    #         {"_id": 0}
+    #     )
 
-        if not user_doc:
-            now = datetime.now(timezone.utc)
-            user_doc = {
-                "user_id": dev_user_id,
-                "email": dev_email,
-                "name": dev_name,
-                "picture": None,
-                "created_at": now.isoformat(),
-            }
-            await db.users.insert_one(user_doc)
+    #     if not user_doc:
+    #         now = datetime.now(timezone.utc)
+    #         user_doc = {
+    #             "user_id": dev_user_id,
+    #             "email": dev_email,
+    #             "name": dev_name,
+    #             "picture": None,
+    #             "created_at": now.isoformat(),
+    #         }
+    #         await db.users.insert_one(user_doc)
 
-        if isinstance(user_doc.get("created_at"), str):
-            user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
+    #     if isinstance(user_doc.get("created_at"), str):
+    #         user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
 
-        return User(**user_doc)
+    #     return User(**user_doc)
 
     # ===== NORMAL AUTH (PRODUCTION) =====
     session_token = request.cookies.get("session_token")
@@ -849,8 +849,8 @@ async def exchange_session(request: Request, response: Response):
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=False,         # <-- local dev ke liye False
-        samesite="lax",       # <-- local dev ke liye lax
+        secure=True,         # for production
+        samesite="none",       # for production with cross-site requests
         path="/",
         max_age=7 * 24 * 60 * 60  # 7 days
     )
