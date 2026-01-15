@@ -1,39 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import axios from "../axios.js";
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-
-// const BACKEND_URL = process.env.REACT_APP_API_BASE_URL; // <-- Make sure this matches everywhere
-
-// In development we completely bypass login and always treat the
-// user as authenticated so you can go straight to the dashboard.
-// const DISABLE_AUTH =
-//   process.env.REACT_APP_DISABLE_AUTH === 'true' ||
-//   process.env.NODE_ENV === 'development';
+import axios from "../axios";
 
 function ProtectedRoute({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    location.state?.user ? true : null
-  );
+
   const [user, setUser] = useState(location.state?.user || null);
-  const [loading, setLoading] = useState(location.state?.user ? false : true);
+  const [loading, setLoading] = useState(!location.state?.user);
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    location.state?.user ? true : false
+  );
 
   useEffect(() => {
-    // ===== DEV MODE: SKIP AUTH CHECKS ENTIRELY =====
-    if (DISABLE_AUTH) {
-      setUser({
-        user_id: 'dev-user',
-        email: 'dev@example.com',
-        name: 'Dev User',
-      });
-      setIsAuthenticated(true);
-      setLoading(false);
-      return;
-    }
-
+    // If user already passed via navigation state, trust it
     if (location.state?.user) {
       setLoading(false);
       return;
@@ -41,15 +21,9 @@ function ProtectedRoute({ children }) {
 
     const checkAuth = async () => {
       try {
-        const response = await axios.get(`${BACKEND_URL}/api/auth/me`, {
-          withCredentials: true,
-        });
-        if (response.status === 200) {
-          setUser(response.data);
-          setIsAuthenticated(true);
-        } else {
-          setIsAuthenticated(false);
-        }
+        const response = await axios.get("/api/auth/me");
+        setUser(response.data);
+        setIsAuthenticated(true);
       } catch (error) {
         setIsAuthenticated(false);
       } finally {
@@ -58,7 +32,7 @@ function ProtectedRoute({ children }) {
     };
 
     checkAuth();
-  }, [navigate, location]);
+  }, [location.state]);
 
   if (loading) {
     return (
@@ -72,7 +46,7 @@ function ProtectedRoute({ children }) {
   }
 
   if (!isAuthenticated) {
-    navigate('/login');
+    navigate("/login");
     return null;
   }
 
