@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import axios from "../axios.js";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 // const DISABLE_AUTH = process.env.REACT_APP_DISABLE_AUTH === "true";

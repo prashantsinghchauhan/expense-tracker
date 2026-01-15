@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import axios from "../axios.js";
 
-const BACKEND_URL = process.env.REACT_APP_API_BASE_URL; // <-- Make sure this matches everywhere
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+
+// const BACKEND_URL = process.env.REACT_APP_API_BASE_URL; // <-- Make sure this matches everywhere
 
 // In development we completely bypass login and always treat the
 // user as authenticated so you can go straight to the dashboard.
-const DISABLE_AUTH =
-  process.env.REACT_APP_DISABLE_AUTH === 'true' ||
-  process.env.NODE_ENV === 'development';
+// const DISABLE_AUTH =
+//   process.env.REACT_APP_DISABLE_AUTH === 'true' ||
+//   process.env.NODE_ENV === 'development';
 
 function ProtectedRoute({ children }) {
   const navigate = useNavigate();

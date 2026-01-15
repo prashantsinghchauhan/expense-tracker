@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from "../axios.js";
 import Navigation from '../components/Navigation';
 import AddExpenseModal from '../components/AddExpenseModal';
 import ExpenseFilters from '../components/ExpenseFilters';

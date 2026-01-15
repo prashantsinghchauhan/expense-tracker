@@ -125,7 +125,7 @@
 
 // export default ReminderWidget;
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from "../axios.js";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
