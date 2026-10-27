@@ -32,7 +32,8 @@ function AppRouter() {
 
 function App() {
   return (
-    <div className="App">
+    // Added dark mode classes to the root wrapper so the whole app inherits the theme
+    <div className="App dark bg-slate-950 text-slate-100 min-h-screen transition-colors duration-300">
       <BrowserRouter>
         <AppRouter />
       </BrowserRouter>

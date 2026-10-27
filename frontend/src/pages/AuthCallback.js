@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import axios from "../axios.js";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-// const DISABLE_AUTH = process.env.REACT_APP_DISABLE_AUTH === "true";
 
 function AuthCallback() {
   const navigate = useNavigate();
@@ -14,16 +13,8 @@ function AuthCallback() {
     if (hasProcessed.current) return;
     hasProcessed.current = true;
 
-    
-    // ✅ DEV MODE: skip Google auth completely
-    // if (DISABLE_AUTH) {
-    //   navigate('/dashboard', { replace: true });
-    //   return;
-    // }
-
     const processSession = async () => {
       try {
-        // Extract session_id from URL fragment
         let sessionId = null;
         if (location.hash) {
           const params = new URLSearchParams(location.hash.substring(1));
@@ -39,7 +30,6 @@ function AuthCallback() {
           return;
         }
 
-        // Exchange session_id for session_token
         const response = await axios.post(
           `${BACKEND_URL}/api/auth/session`,
           { session_id: sessionId },
@@ -47,8 +37,6 @@ function AuthCallback() {
         );
 
         const user = response.data;
-
-        // Navigate to dashboard with user data
         navigate('/dashboard', { state: { user }, replace: true });
       } catch (error) {
         console.error('Auth callback error:', error);
@@ -60,10 +48,10 @@ function AuthCallback() {
   }, [location, navigate]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="text-center">
-        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-        <p className="mt-4 text-gray-600">Completing sign in...</p>
+        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+        <p className="mt-4 text-slate-400 text-sm">Completing sign in...</p>
       </div>
     </div>
   );

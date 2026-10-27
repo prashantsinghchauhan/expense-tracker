@@ -1,63 +1,83 @@
 import React from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
-const COLORS = ['#6366F1', '#EC4899', '#10B981', '#F59E0B', '#3B82F6', '#8B5CF6', '#EF4444', '#06B6D4', '#84CC16', '#F97316'];
+const CHART_COLORS = [
+  '#6366F1', '#10B981', '#F59E0B', '#EC4899', '#3B82F6',
+  '#8B5CF6', '#EF4444', '#06B6D4', '#84CC16', '#F97316'
+];
 
-function CategoryChart({ data }) {
-  if (!data || data.length === 0) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Expenses by Category</h3>
-        <div className="h-64 flex items-center justify-center text-gray-500">
-          No data available
-        </div>
-      </div>
-    );
-  }
-
-  const chartData = data.map(item => ({
-    name: item.category,
-    value: item.total
-  }));
-
-  const total = chartData.reduce((sum, item) => sum + item.value, 0);
+function CategoryChart({ data, categoryMonth, setCategoryMonth }) {
+  const total = (data || []).reduce((sum, item) => sum + item.total, 0);
+  const sorted = [...(data || [])].sort((a, b) => b.total - a.total);
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <ResponsiveContainer width="100%" height={300}>
-        <PieChart>
-          <Pie
-            data={chartData}
-            cx="50%"
-            cy="50%"
-            labelLine={false}
-            label={({ name, value }) => {
-              // Show amount instead of percentage
-              const formatted = `₹${value.toLocaleString('en-IN')}`;
-              // Truncate long category names for better display
-              const displayName = name.length > 12 ? name.substring(0, 10) + '...' : name;
-              return `${displayName}\n${formatted}`;
-            }}
-            outerRadius={80}
-            fill="#8884d8"
-            dataKey="value"
+    <div className="glass-panel rounded-3xl p-6 flex flex-col justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <div>
+          <h3 className="text-lg font-bold text-white">Expenses by Category</h3>
+          <p className="text-xs text-slate-400">Distribution of spending across categories</p>
+        </div>
+        <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
+          <button
+            onClick={() => setCategoryMonth('current')}
+            className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
+              categoryMonth === 'current'
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
           >
-            {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-            ))}
-          </Pie>
-          <Tooltip formatter={(value) => `₹${value.toLocaleString('en-IN')}`} />
-          <Legend 
-            formatter={(value, entry) => {
-              const item = chartData.find(d => d.name === value);
-              return item ? `${value}: ₹${item.value.toLocaleString('en-IN')}` : value;
-            }}
-          />
-        </PieChart>
-      </ResponsiveContainer>
-      {/* Show total below chart */}
-      <div className="mt-4 text-center text-sm text-gray-600">
-        Total: <span className="font-semibold text-gray-900">₹{total.toLocaleString('en-IN')}</span>
+            This Month
+          </button>
+          <button
+            onClick={() => setCategoryMonth(null)}
+            className={`px-3 py-1 text-xs font-bold rounded-lg transition ${
+              categoryMonth === null
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Overall
+          </button>
+        </div>
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
+          No category expenses recorded for this period
+        </div>
+      ) : (
+        <div className="space-y-3.5 my-2 max-h-64 overflow-y-auto pr-1">
+          {sorted.map((item, idx) => {
+            const pct = total > 0 ? ((item.total / total) * 100).toFixed(1) : 0;
+            const color = CHART_COLORS[idx % CHART_COLORS.length];
+            return (
+              <div key={item.category} className="space-y-1.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-white flex items-center">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full mr-2"
+                      style={{ backgroundColor: color }}
+                    />
+                    {item.category}
+                  </span>
+                  <span className="font-mono text-slate-300">
+                    ₹{item.total.toLocaleString('en-IN')} <span className="text-slate-500">({pct}%)</span>
+                  </span>
+                </div>
+                <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%`, backgroundColor: color }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-between items-center text-xs">
+        <span className="text-slate-400">Total Categorized Spend</span>
+        <span className="font-mono font-bold text-sm text-white">₹{total.toLocaleString('en-IN')}</span>
       </div>
     </div>
   );

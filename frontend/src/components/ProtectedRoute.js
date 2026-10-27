@@ -13,7 +13,6 @@ function ProtectedRoute({ children }) {
   );
 
   useEffect(() => {
-    // If user already passed via navigation state, trust it
     if (location.state?.user) {
       setLoading(false);
       return;
@@ -36,10 +35,10 @@ function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+          <p className="mt-4 text-slate-400 text-sm">Loading...</p>
         </div>
       </div>
     );
